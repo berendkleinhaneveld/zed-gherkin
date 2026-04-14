@@ -1,0 +1,14 @@
+[package]
+name = "gherkin-fmt"
+version = "0.1.0"
+edition = "2021"
+description = "Formatter for Gherkin / Cucumber .feature files — aligns tables"
+license = "MIT"
+
+[[bin]]
+name = "gherkin-fmt"
+path = "src/main.rs"
+
+[profile.release]
+lto = true
+strip = true

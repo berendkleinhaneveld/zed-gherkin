@@ -1,0 +1,11 @@
+.claude/
+NOTES.md
+
+# Sibling grammar repo — published separately
+tree-sitter-gherkin/
+
+# Zed extension build cache
+grammars/
+
+# Rust build output
+crates/gherkin-fmt/target/
