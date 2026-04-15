@@ -3,6 +3,8 @@ use lsp_types::{InitializeParams, ServerCapabilities};
 
 #[allow(dead_code)]
 mod expression;
+#[allow(dead_code)]
+mod indexer;
 
 fn main() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
     let (connection, io_threads) = Connection::stdio();
