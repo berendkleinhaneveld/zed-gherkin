@@ -1,6 +1,21 @@
 [workspace]
 resolver = "2"
-members = ["crates/gherkin-fmt", "crates/gherkin-lsp"]
+members = [".", "crates/gherkin-fmt", "crates/gherkin-lsp"]
+default-members = ["."]
+
+[package]
+name = "zed-gherkin"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "MIT"
+
+[lib]
+path = "src/lib.rs"
+crate-type = ["cdylib"]
+
+[dependencies]
+zed_extension_api = "0.7.0"
 
 [profile.release]
 lto = true

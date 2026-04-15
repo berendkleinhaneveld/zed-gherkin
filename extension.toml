@@ -1,7 +1,7 @@
 id = "gherkin"
 name = "Gherkin"
-description = "Syntax highlighting for Gherkin / Cucumber .feature files"
-version = "0.1.0"
+description = "Syntax highlighting, go-to-definition, and find-references for Gherkin / Cucumber .feature files"
+version = "0.2.0"
 schema_version = 1
 authors = ["Berend Klein Haneveld"]
 repository = "https://github.com/berendkleinhaneveld/zed-gherkin"
@@ -9,3 +9,7 @@ repository = "https://github.com/berendkleinhaneveld/zed-gherkin"
 [grammars.gherkin]
 repository = "https://github.com/berendkleinhaneveld/tree-sitter-gherkin"
 rev = "7d21d2f05b7034694a6eb99e2f639824acca0745"
+
+[language_servers.gherkin_lsp]
+name = "Gherkin LSP"
+languages = ["Gherkin"]
