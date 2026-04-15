@@ -8,4 +8,4 @@ tree-sitter-gherkin/
 grammars/
 
 # Rust build output
-crates/gherkin-fmt/target/
+target/
