@@ -21,6 +21,7 @@ pub struct StepDef {
     pub col_end: u32,
     #[allow(dead_code)]
     pub kind: StepKind,
+    #[allow(dead_code)]
     pub expression: String,
     pub regex: Regex,
 }
