@@ -12,4 +12,4 @@ rev = "7d21d2f05b7034694a6eb99e2f639824acca0745"
 
 [language_servers.gherkin_lsp]
 name = "Gherkin LSP"
-languages = ["Gherkin"]
+languages = ["Gherkin", "Python", "JavaScript", "TypeScript"]

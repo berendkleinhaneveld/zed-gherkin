@@ -64,7 +64,38 @@ impl State {
         self.index.scan_file(path, content);
     }
 
-    pub fn definition(&self, uri: &Url, line: u32) -> Vec<Location> {
+    /// Update both the in-memory buffer and the index entry for `uri`.
+    /// Used by didOpen / didChange handlers and tests that simulate edits.
+    pub fn apply_buffer(&mut self, uri: Url, content: String) {
+        if let Ok(path) = uri.to_file_path() {
+            self.rescan_with(&path, &content);
+        }
+        self.buffers.insert(uri, content);
+    }
+
+    /// Rewalks every workspace root and rebuilds the index, then reapplies any
+    /// open-in-memory buffers so unsaved edits to .feature files aren't lost.
+    /// Called at the top of every definition/references query since the LSP is
+    /// bound only to the Gherkin language — Zed doesn't notify us when the
+    /// user edits step-definition files (.py, .js, .ts).
+    pub fn refresh(&mut self) {
+        let mut new_index = Index::default();
+        for root in self.roots.clone() {
+            let idx = Index::build(&root);
+            new_index.defs.extend(idx.defs);
+            new_index.calls.extend(idx.calls);
+        }
+        self.index = new_index;
+        for (uri, content) in self.buffers.clone().iter() {
+            if let Ok(path) = uri.to_file_path() {
+                self.index.drop_file(&path);
+                self.index.scan_file(&path, content);
+            }
+        }
+    }
+
+    pub fn definition(&mut self, uri: &Url, line: u32) -> Vec<Location> {
+        self.refresh();
         let Ok(path) = uri.to_file_path() else {
             return vec![];
         };
@@ -84,7 +115,8 @@ impl State {
             .collect()
     }
 
-    pub fn references(&self, uri: &Url, line: u32) -> Vec<Location> {
+    pub fn references(&mut self, uri: &Url, line: u32) -> Vec<Location> {
+        self.refresh();
         let Ok(path) = uri.to_file_path() else {
             return vec![];
         };
@@ -194,7 +226,7 @@ fn main_loop(
 
 fn handle_request(
     connection: &Connection,
-    state: &State,
+    state: &mut State,
     req: Request,
 ) -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
     if req.method == GotoDefinition::METHOD {
@@ -243,23 +275,13 @@ fn handle_notification(state: &mut State, not: Notification) {
     match not.method.as_str() {
         m if m == DidOpenTextDocument::METHOD => {
             if let Ok(params) = serde_json::from_value::<DidOpenTextDocumentParams>(not.params) {
-                if let Ok(path) = params.text_document.uri.to_file_path() {
-                    state
-                        .buffers
-                        .insert(params.text_document.uri.clone(), params.text_document.text.clone());
-                    state.rescan_with(&path, &params.text_document.text);
-                }
+                state.apply_buffer(params.text_document.uri, params.text_document.text);
             }
         }
         m if m == DidChangeTextDocument::METHOD => {
             if let Ok(params) = serde_json::from_value::<DidChangeTextDocumentParams>(not.params) {
                 if let Some(change) = params.content_changes.into_iter().next() {
-                    if let Ok(path) = params.text_document.uri.to_file_path() {
-                        state
-                            .buffers
-                            .insert(params.text_document.uri.clone(), change.text.clone());
-                        state.rescan_with(&path, &change.text);
-                    }
+                    state.apply_buffer(params.text_document.uri, change.text);
                 }
             }
         }
@@ -331,7 +353,7 @@ Feature: demo
 
     #[test]
     fn definition_from_feature_finds_python_def() {
-        let (dir, state) = setup();
+        let (dir, mut state) = setup();
         let feature = dir.path().join("demo.feature");
         let locs = state.definition(&url(&feature), 2); // line index 2 = "Given I have 5 cukes"
         assert_eq!(locs.len(), 1);
@@ -340,7 +362,7 @@ Feature: demo
 
     #[test]
     fn definition_on_non_step_line_returns_empty() {
-        let (dir, state) = setup();
+        let (dir, mut state) = setup();
         let feature = dir.path().join("demo.feature");
         let locs = state.definition(&url(&feature), 0); // "Feature: demo"
         assert!(locs.is_empty());
@@ -348,7 +370,7 @@ Feature: demo
 
     #[test]
     fn references_from_def_lists_all_matching_calls() {
-        let (dir, state) = setup();
+        let (dir, mut state) = setup();
         let steps = dir.path().join("steps.py");
         // The `@given("I have {int} cukes")` decorator is on line 0.
         let locs = state.references(&url(&steps), 0);
@@ -358,7 +380,7 @@ Feature: demo
 
     #[test]
     fn references_from_call_lists_sibling_calls() {
-        let (dir, state) = setup();
+        let (dir, mut state) = setup();
         let feature = dir.path().join("demo.feature");
         // "Given I have 5 cukes" at line 2; siblings should include line 4.
         let locs = state.references(&url(&feature), 2);
@@ -382,10 +404,10 @@ Feature: demo
     }
 
     #[test]
-    fn drop_file_clears_matching_references() {
+    fn deleting_step_file_clears_matching_references() {
         let (dir, mut state) = setup();
         let steps = dir.path().join("steps.py");
-        state.index.drop_file(&steps);
+        fs::remove_file(&steps).unwrap();
         let feature = dir.path().join("demo.feature");
         let locs = state.definition(&url(&feature), 2);
         assert!(locs.is_empty());

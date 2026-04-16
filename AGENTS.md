@@ -1,10 +1,15 @@
 # AGENTS.md
 
-Zed extension for Gherkin / Cucumber `.feature` files. Three pieces:
+Zed extension for Gherkin / Cucumber `.feature` files. Four pieces:
 
 - `tree-sitter-gherkin/` — grammar + corpus tests (its own git repo)
-- `languages/gherkin/` + `extension.toml` — Zed extension wrapper
+- `languages/gherkin/` + `extension.toml` + `src/lib.rs` — Rust-based Zed extension, compiled to `wasm32-wasip1`
 - `crates/gherkin-fmt/` — standalone Rust CLI used as Zed's external formatter
+- `crates/gherkin-lsp/` — standalone Rust language server providing go-to-definition and find-references
+
+The repo is a Cargo workspace. Root `Cargo.toml` is both `[workspace]` and `[package]` — the package is the extension cdylib. `default-members = ["."]` keeps Zed's `cargo build --target wasm32-wasip1` scoped to the extension lib; the bin crates are built explicitly (`-p gherkin-fmt`, `-p gherkin-lsp`) or via `cargo test --workspace`.
+
+**`cargo test` at repo root with no args only tests the extension lib.** Use `cargo test --workspace` for the full suite.
 
 ## Environment gotcha
 
@@ -14,7 +19,9 @@ The user's zsh profile defines broken `node()` / `npm()` functions. **Always inv
 /opt/homebrew/bin/node tree-sitter-gherkin/node_modules/tree-sitter-cli/cli.js <cmd>
 ```
 
-`cargo`, `rustc`, `gherkin-fmt` (installed via `cargo install --path crates/gherkin-fmt`) are on PATH normally.
+`cargo`, `rustc`, `gherkin-fmt` (installed via `cargo install --path crates/gherkin-fmt`), and `gherkin-lsp` (installed via `cargo install --path crates/gherkin-lsp`) are on PATH normally. Both bin crates must be installed for the extension to be fully functional after `zed: install dev extension`.
+
+Rust target: the extension cdylib requires `wasm32-wasip1`. Add it once with `rustup target add wasm32-wasip1`.
 
 ## Grammar development loop (TDD)
 
@@ -134,3 +141,26 @@ Depth is tracked by `content_depth`, which is set on every header. `Examples:` a
 - For a standalone table with no `Feature:` seen yet, indent falls back to `leading_indent(rows[0])` — useful for unit-testing tables in isolation.
 
 **Not yet handled** (add a failing test first if you grow any of these): multi-byte display width (east-asian wide chars, emoji), line reflow / wrapping of long step text, consistent blank-line policy *between* scenarios (currently only collapses, never inserts).
+
+## Language server development loop
+
+From the repo root:
+
+```sh
+cargo test -p gherkin-lsp --quiet          # 31 unit tests (expression, indexer, server)
+cargo install --path crates/gherkin-lsp    # reinstall to ~/.cargo/bin/gherkin-lsp
+```
+
+Zed auto-launches `gherkin-lsp` via `worktree.which("gherkin-lsp")` once the extension wasm is loaded. If the binary is missing from PATH, the extension returns an install hint instead of silently doing nothing.
+
+## Language server design
+
+Three modules in `crates/gherkin-lsp/src/`:
+
+- **`expression.rs`** — `expression_to_regex` converts a Cucumber expression (`{string}`, `{int}`, `{float}`, `{word}`, `{}`, optional `(...)` groups, `a/b` alternation) to an anchored `regex::Regex`. Unknown parameter types fall through to `.+?`. Literal regex-special characters are escaped via `regex::escape`. Tokens are whitespace-delimited; alternation only fires when every split piece is non-empty, so `/foo` stays a literal path.
+- **`indexer.rs`** — `Index` holds two flat `Vec`s: `StepDef` (definition sites with pre-compiled regexes) and `StepCall` (feature-file callsites). `Index::build(root)` walks with `ignore::WalkBuilder::new(root).require_git(false)` so `.gitignore` is honored even in non-git dirs. Per-language scanners are line-oriented regexes: Python handles behave `@given/@when/@then/@step`, pytest-bdd `@given(parsers.parse(...))`, both quote styles, and `u`/`r` string prefixes. JS/TS handles `Given/When/Then/And/But/defineStep` with `"`, `'`, and `` ` `` literals. `drop_file` + `scan_file` support incremental updates.
+- **`server.rs`** — `State { index, buffers, roots }` plus the `lsp-server` dispatch loop. Advertises `definitionProvider`, `referencesProvider`, `textDocumentSync: Full`. On `definition`, looks up the `StepCall` at the clicked line and returns every `StepDef` whose regex matches. On `references`, branches: clicked in a def file → find calls matching that def; clicked in a feature file → find sibling calls matching the same def. `didChange` drives in-memory reindex; `didSave` / `didChangeWatchedFiles` trigger disk rescans.
+
+**Known limitations** (acceptable v1): ASCII-only LSP position mapping (multi-byte chars are off by N), single-line string literals only, no regex-literal step definitions (`Given(/^.../, ...)`), custom parameter types treated as wildcards, entire workspace reindexed on startup (no persistent cache). Each of these becomes a failing test first if you grow it.
+
+**Architectural note.** A Zed extension's WASM module cannot itself serve as an LSP — `language_server_command` returns a `Command` that Zed spawns as a subprocess. So the LSP has to be a standalone binary on PATH, same pattern as `gherkin-fmt`. `src/lib.rs` is tiny: one method that shells out to `worktree.which("gherkin-lsp")`.

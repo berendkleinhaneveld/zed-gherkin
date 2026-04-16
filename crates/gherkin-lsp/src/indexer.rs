@@ -95,7 +95,7 @@ fn feature_re() -> &'static Regex {
 fn python_re() -> &'static Regex {
     PYTHON_RE.get_or_init(|| {
         Regex::new(
-            r#"@(given|when|then|step)\s*\(\s*(?:\w+\.\w+\s*\(\s*)?[ur]?(?:"([^"]*)"|'([^']*)')"#,
+            r#"^\s*@(given|when|then|step)\s*\(\s*(?:\w+\.\w+\s*\(\s*)?[ur]?(?:"([^"]*)"|'([^']*)')"#,
         )
         .unwrap()
     })
@@ -266,6 +266,21 @@ def _(c): pass
         assert_eq!(index.defs[1].expression, "unicode prefix");
         assert_eq!(index.defs[2].expression, "catchall");
         assert_eq!(index.defs[2].kind, StepKind::Any);
+    }
+
+    #[test]
+    fn python_commented_out_decorator_is_ignored() {
+        let mut index = Index::default();
+        let content = r#"
+# @given("should not match")
+# def _(c): pass
+
+@given("should match")
+def _(c): pass
+"#;
+        index.scan_file(&p("steps.py"), content);
+        assert_eq!(index.defs.len(), 1);
+        assert_eq!(index.defs[0].expression, "should match");
     }
 
     #[test]
