@@ -65,12 +65,13 @@ Wire it up in your Zed `settings.json`:
 }
 ```
 
-Pass `--tags-per-line` if you prefer one tag per line over space-separated tags.
+Pass `--tags-per-line` if you prefer one tag per line over space-separated tags. Pass `--indent N` to change the number of spaces per indent level (default `2`), e.g. `"arguments": ["--indent", "4"]`.
 
 ## What it does
 
-- Indents `Feature:` / `Rule:` / `Scenario:` / steps / tables with a consistent 2-space scheme
+- Indents `Feature:` / `Rule:` / `Scenario:` / steps / tables with a consistent scheme (2 spaces per level by default; configurable with `--indent N`)
 - Aligns table columns; numeric columns are right-aligned
+- Hang-indents continuation lines of `- ` description lists so wrapped prose aligns past the marker
 - Collapses runs of blank lines
 - Leaves doc-string (`"""` / ``` ``` ```) contents untouched
 - Normalizes tag groups onto a single line (or one per line with `--tags-per-line`)
