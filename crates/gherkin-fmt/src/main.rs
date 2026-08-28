@@ -29,37 +29,57 @@ usage: gherkin-fmt [options] < input.feature > output.feature
 
 options:
   --tags-per-line    emit each @tag on its own line (default: join on one)
+  --indent N         number of spaces per indent level (default: 2)
   -h, --help         show this help";
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Config {
     pub tags_per_line: bool,
+    /// The string emitted for one level of indentation. Defaults to two
+    /// spaces; configurable via `--indent N`.
+    pub indent: String,
 }
 
 impl Default for Config {
     fn default() -> Self {
-        Self { tags_per_line: false }
+        Self { tags_per_line: false, indent: "  ".to_string() }
     }
 }
 
 impl Config {
     fn from_args(args: &[String]) -> Result<Self, String> {
         let mut cfg = Config::default();
-        for arg in args {
+        let mut iter = args.iter();
+        while let Some(arg) = iter.next() {
             match arg.as_str() {
                 "--tags-per-line" => cfg.tags_per_line = true,
-                "-h" | "--help" => {
-                    println!("{USAGE}");
-                    std::process::exit(0);
+                "--indent" => {
+                    let val = iter
+                        .next()
+                        .ok_or_else(|| "--indent requires a value".to_string())?;
+                    let n: usize = val
+                        .parse()
+                        .map_err(|_| format!("invalid --indent value: {val}"))?;
+                    cfg.indent = " ".repeat(n);
                 }
-                other => return Err(format!("unknown argument: {other}")),
+                other => {
+                    if let Some(val) = other.strip_prefix("--indent=") {
+                        let n: usize = val
+                            .parse()
+                            .map_err(|_| format!("invalid --indent value: {val}"))?;
+                        cfg.indent = " ".repeat(n);
+                    } else if other == "-h" || other == "--help" {
+                        println!("{USAGE}");
+                        std::process::exit(0);
+                    } else {
+                        return Err(format!("unknown argument: {other}"));
+                    }
+                }
             }
         }
         Ok(cfg)
     }
 }
-
-const INDENT: &str = "  ";
 
 /// Format a Gherkin document. In order, this:
 ///
@@ -105,7 +125,7 @@ pub fn format_gherkin_with(input: &str, config: &Config) -> String {
                 in_docstring = false;
                 emitter.push(format!(
                     "{}{}",
-                    INDENT.repeat(content_depth + 1),
+                    config.indent.repeat(content_depth + 1),
                     line.trim()
                 ));
             } else {
@@ -133,7 +153,7 @@ pub fn format_gherkin_with(input: &str, config: &Config) -> String {
                 i += 1;
             }
             let indent = if seen_header {
-                INDENT.repeat(content_depth + 1)
+                config.indent.repeat(content_depth + 1)
             } else {
                 // Standalone table with no enclosing Feature — preserve
                 // whatever the author already used.
@@ -149,7 +169,7 @@ pub fn format_gherkin_with(input: &str, config: &Config) -> String {
 
         if is_docstring_marker(line) {
             let depth = content_depth + 1;
-            let indent = INDENT.repeat(depth);
+            let indent = config.indent.repeat(depth);
             flush_tags(&mut emitter, &mut pending_tags, &indent, config);
             emitter.push(format!("{}{}", indent, line.trim()));
             in_docstring = true;
@@ -172,7 +192,7 @@ pub fn format_gherkin_with(input: &str, config: &Config) -> String {
             // child level of the enclosing block.
             content_depth
         };
-        let indent_str = INDENT.repeat(depth);
+        let indent_str = config.indent.repeat(depth);
         flush_tags(&mut emitter, &mut pending_tags, &indent_str, config);
         emitter.push(format!("{}{}", indent_str, line.trim()));
 
@@ -196,7 +216,7 @@ pub fn format_gherkin_with(input: &str, config: &Config) -> String {
 
     // Dangling tags at EOF (malformed file but don't drop them).
     if !pending_tags.is_empty() {
-        let indent_str = INDENT.repeat(content_depth);
+        let indent_str = config.indent.repeat(content_depth);
         flush_tags(&mut emitter, &mut pending_tags, &indent_str, config);
     }
 
@@ -465,7 +485,14 @@ mod tests {
     }
 
     fn fmt_split(s: &str) -> String {
-        format_gherkin_with(s, &Config { tags_per_line: true })
+        format_gherkin_with(s, &Config { tags_per_line: true, ..Config::default() })
+    }
+
+    fn fmt_indent(s: &str, n: usize) -> String {
+        format_gherkin_with(
+            s,
+            &Config { indent: " ".repeat(n), ..Config::default() },
+        )
     }
 
     // ---------- table alignment ----------
@@ -758,6 +785,44 @@ Feature: f
       \"\"\"
 ";
         assert_eq!(fmt(src), want);
+    }
+
+    // ---------- configurable indent ----------
+
+    #[test]
+    fn custom_indent_width() {
+        let src = "\
+Feature: f
+Scenario: s
+Given a
+Examples:
+| a |
+| 1 |
+";
+        let want = "\
+Feature: f
+    Scenario: s
+        Given a
+        Examples:
+            | a |
+            | 1 |
+";
+        assert_eq!(fmt_indent(src, 4), want);
+    }
+
+    #[test]
+    fn zero_indent_flattens() {
+        let src = "Feature: f\n  Scenario: s\n    Given a\n";
+        let want = "Feature: f\nScenario: s\nGiven a\n";
+        assert_eq!(fmt_indent(src, 0), want);
+    }
+
+    #[test]
+    fn indent_arg_parses() {
+        let cfg = Config::from_args(&["--indent".into(), "3".into()]).unwrap();
+        assert_eq!(cfg.indent, "   ");
+        let cfg = Config::from_args(&["--indent=1".into()]).unwrap();
+        assert_eq!(cfg.indent, " ");
     }
 
     // ---------- combined ----------

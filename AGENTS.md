@@ -116,7 +116,7 @@ Zed pipes the buffer over stdin and replaces it with stdout. No extension-API ho
 
 `format_gherkin` walks lines once with a small state machine (`has_rule`, `content_depth`, `in_docstring`, `pending_tags`) and streams into an `Emitter` that does blank-line normalization on the fly.
 
-**Canonical depths** (2-space unit):
+**Canonical depths** (`config.indent` unit, 2-space default; override with `--indent N`):
 | construct | no `Rule:` | under `Rule:` |
 |---|---|---|
 | `Feature:` | 0 | — |
