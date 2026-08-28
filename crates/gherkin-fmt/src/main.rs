@@ -115,6 +115,10 @@ pub fn format_gherkin_with(input: &str, config: &Config) -> String {
     let mut seen_header = false;
     let mut in_docstring = false;
     let mut pending_tags: Vec<String> = Vec::new();
+    // When inside a dash-list item's description, holds the hanging-indent
+    // string that continuation lines (non-dash prose following a `- ` item)
+    // should be prefixed with. Reset on blank/structural lines.
+    let mut list_hang: Option<String> = None;
 
     let mut i = 0;
     while i < lines.len() {
@@ -137,6 +141,7 @@ pub fn format_gherkin_with(input: &str, config: &Config) -> String {
 
         if is_blank(line) {
             emitter.push_blank();
+            list_hang = None;
             i += 1;
             continue;
         }
@@ -179,6 +184,45 @@ pub fn format_gherkin_with(input: &str, config: &Config) -> String {
 
         // Structural / body line — compute the depth it should go at,
         // flush any pending tag block at the same depth, then emit.
+        let is_description = !is_feature(line)
+            && !is_rule(line)
+            && !is_background(line)
+            && !is_scenario(line)
+            && !is_examples(line)
+            && !is_step(line)
+            && !is_comment(line);
+
+        // Description prose: handle dash-list hanging indentation. A line
+        // starting with `- ` is a list item; the prose lines that follow
+        // it (until a blank, a new item, or a structural line) are
+        // continuations that hang-indent past the `- ` marker.
+        if is_description {
+            let trimmed = line.trim();
+            let base = config.indent.repeat(content_depth);
+            if let Some(marker) = dash_marker(trimmed) {
+                // New list item. Continuations align past "<marker> ".
+                let hang = format!("{}{}", base, " ".repeat(marker.len() + 1));
+                flush_tags(&mut emitter, &mut pending_tags, &base, config);
+                emitter.push(format!("{}{}", base, trimmed));
+                list_hang = Some(hang);
+                i += 1;
+                continue;
+            } else if let Some(hang) = &list_hang {
+                // Continuation of the current list item.
+                let hang = hang.clone();
+                flush_tags(&mut emitter, &mut pending_tags, &hang, config);
+                emitter.push(format!("{}{}", hang, trimmed));
+                i += 1;
+                continue;
+            }
+            // Plain description line, not part of a list.
+            flush_tags(&mut emitter, &mut pending_tags, &base, config);
+            emitter.push(format!("{}{}", base, trimmed));
+            i += 1;
+            continue;
+        }
+
+        list_hang = None;
         let depth = if is_feature(line) {
             0
         } else if is_rule(line) {
@@ -188,8 +232,7 @@ pub fn format_gherkin_with(input: &str, config: &Config) -> String {
         } else if is_examples(line) || is_step(line) {
             content_depth
         } else {
-            // Comments and free-text descriptions: indent to the current
-            // child level of the enclosing block.
+            // Comments: indent to the current child level of the block.
             content_depth
         };
         let indent_str = config.indent.repeat(depth);
@@ -350,6 +393,18 @@ fn is_step(line: &str) -> bool {
 fn leading_indent(line: &str) -> &str {
     let end = line.len() - line.trim_start().len();
     &line[..end]
+}
+
+/// If `trimmed` (already left-trimmed) begins with a dash-list marker
+/// followed by whitespace, return the marker string (e.g. `"-"`). Used to
+/// compute the hanging indent for continuation lines.
+fn dash_marker(trimmed: &str) -> Option<&str> {
+    let rest = trimmed.strip_prefix('-')?;
+    if rest.is_empty() || rest.starts_with(char::is_whitespace) {
+        Some(&trimmed[..1])
+    } else {
+        None
+    }
 }
 
 // ---------- tag flushing ----------
@@ -823,6 +878,75 @@ Feature: f
         assert_eq!(cfg.indent, "   ");
         let cfg = Config::from_args(&["--indent=1".into()]).unwrap();
         assert_eq!(cfg.indent, " ");
+    }
+
+    // ---------- description list hanging indent ----------
+
+    #[test]
+    fn dash_list_continuation_hang_indented() {
+        let src = "\
+Feature: f
+This test verifies that:
+- If the case is opened on a device that does not fulfill requirements, it warns
+and prevents the user from accessing the planner until acknowledged.
+  Scenario: s
+    Given a
+";
+        let want = "\
+Feature: f
+  This test verifies that:
+  - If the case is opened on a device that does not fulfill requirements, it warns
+    and prevents the user from accessing the planner until acknowledged.
+  Scenario: s
+    Given a
+";
+        assert_eq!(fmt(src), want);
+    }
+
+    #[test]
+    fn dash_list_multiple_items_and_blank_resets() {
+        let src = "\
+Feature: f
+Intro:
+- first item
+continues here
+- second item
+also continues
+
+not part of list
+  Scenario: s
+    Given a
+";
+        let want = "\
+Feature: f
+  Intro:
+  - first item
+    continues here
+  - second item
+    also continues
+
+  not part of list
+  Scenario: s
+    Given a
+";
+        assert_eq!(fmt(src), want);
+    }
+
+    #[test]
+    fn dash_list_hang_respects_custom_indent() {
+        let src = "\
+Feature: f
+Intro:
+- item
+continues
+";
+        let want = "\
+Feature: f
+    Intro:
+    - item
+      continues
+";
+        assert_eq!(fmt_indent(src, 4), want);
     }
 
     // ---------- combined ----------

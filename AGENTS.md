@@ -129,7 +129,9 @@ Depth is tracked by `content_depth`, which is set on every header. `Examples:` a
 
 **Tags** are buffered in `pending_tags` until the next structural line; `flush_tags` emits them on one line at that line's depth, with single-space separators regardless of how the source had them grouped.
 
-**Blank lines** are collapsed by the `Emitter`: leading blanks are dropped (`at_start`), runs are coalesced (`pending_blank`), and the final `\n` is guaranteed.
+**Description lists** — a description prose line beginning with `- ` (see `dash_marker`) is a list item emitted at `content_depth`; following prose lines (until a blank, a new `- ` item, or a structural line) are treated as continuations and hang-indented to align past the `- ` marker. The `list_hang` state variable holds the continuation prefix.
+
+**Blank lines** are collapsed by the `Emitter`: leading blanks are dropped (`at_start`), runs are coalesced (`pending_blank`), and the final `\n` is guaranteed. are collapsed by the `Emitter`: leading blanks are dropped (`at_start`), runs are coalesced (`pending_blank`), and the final `\n` is guaranteed.
 
 **Doc-string contents** are pushed via `push_verbatim` — never re-indented and never blank-collapsed. The opening/closing `"""` or ```` ``` ```` markers are aligned to `content_depth + 1` but the body is left untouched.
 
